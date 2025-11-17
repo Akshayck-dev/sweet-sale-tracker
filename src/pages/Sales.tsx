@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { Download, Calendar } from "lucide-react";
-import { format } from "date-fns";
+import { format, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, subYears, subDays, startOfWeek, endOfWeek } from "date-fns";
 
 interface Sale {
   id: string;
@@ -27,6 +27,27 @@ export default function Sales() {
   useEffect(() => {
     fetchSales();
   }, [user, fromDate, toDate]);
+
+  const setDateRange = (from: Date, to: Date) => {
+    setFromDate(format(from, "yyyy-MM-dd"));
+    setToDate(format(to, "yyyy-MM-dd"));
+  };
+
+  const quickFilters = {
+    today: () => setDateRange(new Date(), new Date()),
+    yesterday: () => setDateRange(subDays(new Date(), 1), subDays(new Date(), 1)),
+    thisWeek: () => setDateRange(startOfWeek(new Date()), endOfWeek(new Date())),
+    thisMonth: () => setDateRange(startOfMonth(new Date()), endOfMonth(new Date())),
+    lastMonth: () => {
+      const lastMonth = subMonths(new Date(), 1);
+      setDateRange(startOfMonth(lastMonth), endOfMonth(lastMonth));
+    },
+    thisYear: () => setDateRange(startOfYear(new Date()), endOfYear(new Date())),
+    lastYear: () => {
+      const lastYear = subYears(new Date(), 1);
+      setDateRange(startOfYear(lastYear), endOfYear(lastYear));
+    },
+  };
 
   const fetchSales = async () => {
     if (!user) return;
@@ -115,9 +136,18 @@ export default function Sales() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Date Range</CardTitle>
+          <CardTitle>Filter Sales</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={quickFilters.today}>Today</Button>
+            <Button variant="outline" size="sm" onClick={quickFilters.yesterday}>Yesterday</Button>
+            <Button variant="outline" size="sm" onClick={quickFilters.thisWeek}>This Week</Button>
+            <Button variant="outline" size="sm" onClick={quickFilters.thisMonth}>This Month</Button>
+            <Button variant="outline" size="sm" onClick={quickFilters.lastMonth}>Last Month</Button>
+            <Button variant="outline" size="sm" onClick={quickFilters.thisYear}>This Year</Button>
+            <Button variant="outline" size="sm" onClick={quickFilters.lastYear}>Last Year</Button>
+          </div>
           <div className="grid md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>From Date</Label>
