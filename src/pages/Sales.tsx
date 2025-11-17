@@ -3,10 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { Download, Calendar } from "lucide-react";
+import { Download, Calendar, Plus, X } from "lucide-react";
 import { format, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, subYears, subDays, startOfWeek, endOfWeek } from "date-fns";
 
 interface Sale {
@@ -23,6 +25,16 @@ export default function Sales() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [fromDate, setFromDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [toDate, setToDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  
+  // Historical sale entry states
+  const [showHistoricalDialog, setShowHistoricalDialog] = useState(false);
+  const [historicalDate, setHistoricalDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [bakeries, setBakeries] = useState<any[]>([]);
+  const [items, setItems] = useState<any[]>([]);
+  const [selectedBakeryId, setSelectedBakeryId] = useState("");
+  const [cartItems, setCartItems] = useState<any[]>([]);
+  const [selectedItemId, setSelectedItemId] = useState("");
+  const [itemQty, setItemQty] = useState(1);
 
   useEffect(() => {
     fetchSales();
@@ -70,6 +82,81 @@ export default function Sales() {
       toast.error("Failed to fetch sales");
     } else {
       setSales(data || []);
+    }
+  };
+
+  const fetchBakeriesAndItems = async () => {
+    if (!user) return;
+    
+    const [bakeriesRes, itemsRes] = await Promise.all([
+      supabase.from("bakeries").select("*").eq("created_by", user.id).order("last_used_at", { ascending: false }),
+      supabase.from("items").select("*").eq("created_by", user.id).order("name")
+    ]);
+
+    if (bakeriesRes.data) setBakeries(bakeriesRes.data);
+    if (itemsRes.data) setItems(itemsRes.data);
+  };
+
+  const addItemToCart = () => {
+    const item = items.find(i => i.id === selectedItemId);
+    if (!item || itemQty < 1) return;
+
+    const existing = cartItems.find(ci => ci.itemId === selectedItemId);
+    if (existing) {
+      setCartItems(cartItems.map(ci => 
+        ci.itemId === selectedItemId 
+          ? { ...ci, qty: ci.qty + itemQty, amount: (ci.qty + itemQty) * ci.unitPrice }
+          : ci
+      ));
+    } else {
+      setCartItems([...cartItems, {
+        itemId: item.id,
+        name: item.name,
+        qty: itemQty,
+        unitPrice: item.unit_price,
+        amount: itemQty * item.unit_price
+      }]);
+    }
+    setSelectedItemId("");
+    setItemQty(1);
+  };
+
+  const removeFromCart = (itemId: string) => {
+    setCartItems(cartItems.filter(ci => ci.itemId !== itemId));
+  };
+
+  const saveHistoricalSale = async () => {
+    if (!user || !selectedBakeryId || cartItems.length === 0) {
+      toast.error("Please select bakery and add items");
+      return;
+    }
+
+    const bakery = bakeries.find(b => b.id === selectedBakeryId);
+    const total = cartItems.reduce((sum, item) => sum + item.amount, 0);
+
+    const saleDate = new Date(historicalDate);
+    saleDate.setHours(12, 0, 0, 0);
+
+    const { error } = await supabase.from("sales").insert({
+      bakery_id: selectedBakeryId,
+      bakery_name: bakery.name,
+      bakery_phone: bakery.phone,
+      items: cartItems,
+      total_amount: total,
+      created_by: user.id,
+      created_at: saleDate.toISOString(),
+      status: "saved"
+    });
+
+    if (error) {
+      toast.error("Failed to save sale");
+    } else {
+      toast.success("Historical sale added");
+      setShowHistoricalDialog(false);
+      setCartItems([]);
+      setSelectedBakeryId("");
+      setHistoricalDate(format(new Date(), "yyyy-MM-dd"));
+      fetchSales();
     }
   };
 
@@ -148,7 +235,7 @@ export default function Sales() {
             <Button variant="outline" size="sm" onClick={quickFilters.thisYear}>This Year</Button>
             <Button variant="outline" size="sm" onClick={quickFilters.lastYear}>Last Year</Button>
           </div>
-          <div className="grid md:grid-cols-3 gap-4">
+          <div className="grid md:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label>From Date</Label>
               <Input
@@ -170,6 +257,111 @@ export default function Sales() {
                 <Download className="h-4 w-4 mr-2" />
                 Export CSV
               </Button>
+            </div>
+            <div className="flex items-end">
+              <Dialog open={showHistoricalDialog} onOpenChange={(open) => {
+                setShowHistoricalDialog(open);
+                if (open) fetchBakeriesAndItems();
+                else {
+                  setCartItems([]);
+                  setSelectedBakeryId("");
+                }
+              }}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="w-full">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Historical Sale
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Add Historical Sale</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Sale Date</Label>
+                      <Input
+                        type="date"
+                        value={historicalDate}
+                        onChange={(e) => setHistoricalDate(e.target.value)}
+                        max={format(new Date(), "yyyy-MM-dd")}
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>Bakery</Label>
+                      <Select value={selectedBakeryId} onValueChange={setSelectedBakeryId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select bakery" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {bakeries.map(b => (
+                            <SelectItem key={b.id} value={b.id}>
+                              {b.name} - {b.phone}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Add Items</Label>
+                      <div className="flex gap-2">
+                        <Select value={selectedItemId} onValueChange={setSelectedItemId}>
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Select item" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {items.map(item => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.name} - ₹{item.unit_price}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={itemQty}
+                          onChange={(e) => setItemQty(Number(e.target.value))}
+                          className="w-20"
+                        />
+                        <Button onClick={addItemToCart}>Add</Button>
+                      </div>
+                    </div>
+
+                    {cartItems.length > 0 && (
+                      <div className="space-y-2">
+                        <Label>Cart Items</Label>
+                        <div className="space-y-2 border rounded p-2">
+                          {cartItems.map((item, idx) => (
+                            <div key={idx} className="flex justify-between items-center p-2 bg-secondary rounded">
+                              <span>{item.name}</span>
+                              <span className="text-sm text-muted-foreground">
+                                {item.qty} × ₹{item.unitPrice} = ₹{item.amount}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeFromCart(item.itemId)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                          <div className="text-right font-bold pt-2 border-t">
+                            Total: ₹{cartItems.reduce((sum, item) => sum + item.amount, 0)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <Button onClick={saveHistoricalSale} className="w-full">
+                      Save Historical Sale
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
         </CardContent>
